@@ -707,6 +707,20 @@ static void process_client_data(hl_server_t *srv, hl_client_conn_t *cc, hl_event
 
 /* --- Handle a new client connection (handshake + login) --- */
 
+/* Bound every blocking read/write on a freshly accepted socket. Accepts,
+ * TLS handshakes and the Hotline handshake all run on the main event-loop
+ * thread, so without a timeout one client that connects and sends nothing
+ * freezes the whole server. Callers may later replace or clear these
+ * (e.g. after login). */
+static void set_accept_timeouts(int fd, int seconds)
+{
+    struct timeval tv;
+    tv.tv_sec = seconds;
+    tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+}
+
 static void handle_new_connection(hl_server_t *srv, int client_fd,
                                   struct sockaddr_in *client_addr,
                                   hl_event_loop_t *evloop,
@@ -2336,6 +2350,7 @@ int hl_server_listen_and_serve(hl_server_t *srv)
                                        (struct sockaddr *)&client_addr,
                                        &addr_len);
                 if (client_fd >= 0) {
+                    set_accept_timeouts(client_fd, 10);
                     handle_new_connection(srv, client_fd, &client_addr,
                                          evloop, NULL);
                 }
@@ -2348,6 +2363,7 @@ int hl_server_listen_and_serve(hl_server_t *srv)
                                        (struct sockaddr *)&client_addr,
                                        &addr_len);
                 if (client_fd >= 0) {
+                    set_accept_timeouts(client_fd, 30);
                     handle_file_transfer_connection(srv, client_fd, NULL);
                 }
             }
@@ -2360,6 +2376,7 @@ int hl_server_listen_and_serve(hl_server_t *srv)
                                        (struct sockaddr *)&client_addr,
                                        &addr_len);
                 if (client_fd >= 0) {
+                    set_accept_timeouts(client_fd, 10);
                     hl_tls_conn_t *tconn = hl_tls_accept(&srv->tls_ctx,
                                                           client_fd);
                     if (tconn) {
@@ -2377,6 +2394,7 @@ int hl_server_listen_and_serve(hl_server_t *srv)
                                        (struct sockaddr *)&client_addr,
                                        &addr_len);
                 if (client_fd >= 0) {
+                    set_accept_timeouts(client_fd, 30);
                     hl_tls_conn_t *tconn = hl_tls_accept(&srv->tls_ctx,
                                                           client_fd);
                     if (tconn) {

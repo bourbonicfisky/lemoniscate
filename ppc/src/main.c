@@ -261,6 +261,7 @@ int main(int argc, char **argv)
     const char *interface_addr = "";
     int port = 5500;
     const char *config_dir = NULL;
+    int config_dir_explicit = 0;  /* set by -c/--config */
     const char *log_file = NULL;
     const char *log_level = "info";
     const char *api_addr = NULL; /* Compatibility flag used by MobiusAdmin */
@@ -294,7 +295,7 @@ int main(int argc, char **argv)
         switch (opt) {
             case 'i': interface_addr = optarg; break;
             case 'p': port = atoi(optarg); break;
-            case 'c': config_dir = optarg; break;
+            case 'c': config_dir = optarg; config_dir_explicit = 1; break;
             case 'f': log_file = optarg; break;
             case 'l': log_level = optarg; break;
             case 'T': tls_cert = optarg; break;
@@ -397,6 +398,17 @@ int main(int argc, char **argv)
             if (mobius_load_config(&srv->config, config_dir) == 0) {
                 hl_log_info(srv->logger, "Loaded config from %s", config_dir);
                 config_loaded = 1;
+            } else if (config_dir_explicit) {
+                /* An explicitly configured directory that can't be read
+                 * must not silently fall back to defaults: exit non-zero
+                 * so the service manager retries. */
+                hl_log_error(srv->logger,
+                             "Could not load config from %s; refusing to start "
+                             "with defaults (use --init to create one)",
+                             config_dir);
+                fprintf(stderr, "lemoniscate: could not load config from %s\n",
+                        config_dir);
+                return 1;
             } else {
                 hl_log_info(srv->logger, "No config found, using defaults");
             }
