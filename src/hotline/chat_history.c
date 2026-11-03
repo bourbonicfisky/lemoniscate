@@ -184,19 +184,52 @@ static int lm_json_quote(char *out, size_t cap, const char *in)
     return (int)o;
 }
 
+/* Locate the value for "key" in a flat JSON object line. Accepts any
+ * whitespace around the colon ("key":"v" and "key": "v"). Matches inside
+ * string values are skipped: a real key follows '{' or ','. */
+static const char *lm_json_find_value(const char *line, const char *key)
+{
+    char needle[64];
+    const char *p, *q;
+    size_t nlen;
+
+    if (snprintf(needle, sizeof(needle), "\"%s\"", key) >= (int)sizeof(needle))
+        return NULL;
+    nlen = strlen(needle);
+    for (p = strstr(line, needle); p; p = strstr(p + 1, needle)) {
+        q = p;
+        while (q > line && isspace((unsigned char)q[-1])) q--;
+        if (q != line && q[-1] != '{' && q[-1] != ',') continue;
+        q = p + nlen;
+        while (isspace((unsigned char)*q)) q++;
+        if (*q != ':') continue;
+        q++;
+        while (isspace((unsigned char)*q)) q++;
+        return q;
+    }
+    return NULL;
+}
+
 /* Find the value for `"key":"..."` in line, copy into out.
  * Handles the small escape set we emit. Returns 0 on success. */
 static int lm_json_get_string(const char *line, const char *key,
                               char *out, size_t cap)
 {
-    char needle[64];
-    snprintf(needle, sizeof(needle), "\"%s\":\"", key);
-    const char *p = strstr(line, needle);
-    if (!p) { if (cap) out[0] = '\0'; return -1; }
-    p += strlen(needle);
+    const char *p = lm_json_find_value(line, key);
     size_t o = 0;
+
+    if (!p || *p != '"') { if (cap) out[0] = '\0'; return -1; }
+    p++;
     while (*p && *p != '"') {
-        if (*p == '\\' && p[1]) {
+        if (*p == '\\' && p[1] == 'u' && isxdigit((unsigned char)p[2]) &&
+            isxdigit((unsigned char)p[3]) && isxdigit((unsigned char)p[4]) &&
+            isxdigit((unsigned char)p[5]) && p[2] == '0' && p[3] == '0') {
+            /* \u00XX — what lm_json_escape emits for control characters */
+            int hi = isdigit((unsigned char)p[4]) ? p[4] - '0' : (tolower((unsigned char)p[4]) - 'a' + 10);
+            int lo = isdigit((unsigned char)p[5]) ? p[5] - '0' : (tolower((unsigned char)p[5]) - 'a' + 10);
+            if (o + 1 < cap) out[o++] = (char)((hi << 4) | lo);
+            p += 6;
+        } else if (*p == '\\' && p[1]) {
             char c = 0;
             switch (p[1]) {
                 case '"':  c = '"'; break;
@@ -222,14 +255,12 @@ static int lm_json_get_string(const char *line, const char *key,
 
 static int lm_json_get_u64(const char *line, const char *key, uint64_t *out)
 {
-    char needle[64];
-    snprintf(needle, sizeof(needle), "\"%s\":", key);
-    const char *p = strstr(line, needle);
-    if (!p) return -1;
-    p += strlen(needle);
-    while (*p == ' ') ++p;
+    const char *p = lm_json_find_value(line, key);
     char *end;
-    unsigned long long v = strtoull(p, &end, 10);
+    unsigned long long v;
+
+    if (!p) return -1;
+    v = strtoull(p, &end, 10);
     if (end == p) return -1;
     *out = (uint64_t)v;
     return 0;

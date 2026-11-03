@@ -111,6 +111,14 @@ void json_buf_append_escaped(json_buf_t *buf, const char *str)
     }
 }
 
+void json_buf_append_escaped_n(json_buf_t *buf, const char *str, size_t len)
+{
+    size_t i;
+    if (!str) return;
+    for (i = 0; i < len; i++)
+        escape_char(buf, (unsigned char)str[i]);
+}
+
 void json_buf_add_string(json_buf_t *buf, const char *key, const char *value)
 {
     json_buf_append_str(buf, "\"");
@@ -164,4 +172,112 @@ int json_escape_string(const char *input, char *out_buf, size_t out_size)
     json_buf_free(&tmp);
 
     return truncated ? -1 : (int)copy_len;
+}
+
+/* --- Minimal reading helpers for flat JSON objects --- */
+
+static int json_is_ws(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+const char *json_find_value(const char *json, const char *key)
+{
+    char needle[128];
+    const char *p;
+    const char *q;
+    size_t nlen;
+
+    if (!json || !key) return NULL;
+    if (snprintf(needle, sizeof(needle), "\"%s\"", key) >= (int)sizeof(needle))
+        return NULL;
+    nlen = strlen(needle);
+
+    for (p = strstr(json, needle); p; p = strstr(p + 1, needle)) {
+        /* A real key is preceded (ignoring whitespace) by '{' or ','.
+         * This rejects matches inside string values. */
+        q = p;
+        while (q > json && json_is_ws(q[-1])) q--;
+        if (q != json && q[-1] != '{' && q[-1] != ',') continue;
+
+        q = p + nlen;
+        while (json_is_ws(*q)) q++;
+        if (*q != ':') continue;
+        q++;
+        while (json_is_ws(*q)) q++;
+        return q;
+    }
+    return NULL;
+}
+
+/* Parse 4 hex digits; returns the value or -1. */
+static int json_hex4(const char *p)
+{
+    int i, v = 0;
+    for (i = 0; i < 4; i++) {
+        char h = p[i];
+        v <<= 4;
+        if (h >= '0' && h <= '9') v |= h - '0';
+        else if (h >= 'a' && h <= 'f') v |= h - 'a' + 10;
+        else if (h >= 'A' && h <= 'F') v |= h - 'A' + 10;
+        else return -1;
+    }
+    return v;
+}
+
+/* Unescape a JSON string body starting just after its opening quote.
+ * If out is NULL, only measures. Returns the unescaped length. */
+static size_t json_unescape(const char *p, char *out, size_t out_size)
+{
+    size_t n = 0;
+    char c;
+
+    while (*p && *p != '"') {
+        if (*p == '\\' && p[1] == 'u' && json_hex4(p + 2) >= 0 &&
+            json_hex4(p + 2) < 0x100) {
+            /* \u00XX — what our writers emit for control characters */
+            c = (char)json_hex4(p + 2);
+            p += 6;
+        } else if (*p == '\\' && p[1]) {
+            switch (p[1]) {
+            case 'n': c = '\n'; break;
+            case 'r': c = '\r'; break;
+            case 't': c = '\t'; break;
+            case 'b': c = '\b'; break;
+            case 'f': c = '\f'; break;
+            default:  c = p[1]; break; /* \" \\ \/ and anything else */
+            }
+            p += 2;
+        } else {
+            c = *p++;
+        }
+        if (out && n + 1 < out_size) out[n] = c;
+        n++;
+    }
+    if (out && out_size) out[n < out_size ? n : out_size - 1] = '\0';
+    return n;
+}
+
+int json_read_string(const char *json, const char *key, char *out, size_t out_size)
+{
+    const char *p = json_find_value(json, key);
+
+    if (out_size) out[0] = '\0';
+    if (!p || *p != '"') return -1;
+    json_unescape(p + 1, out, out_size);
+    return 0;
+}
+
+char *json_read_string_alloc(const char *json, const char *key)
+{
+    const char *p = json_find_value(json, key);
+    size_t len;
+    char *out;
+
+    if (!p || *p != '"') return NULL;
+    len = json_unescape(p + 1, NULL, 0);
+    out = (char *)malloc(len + 1);
+    if (!out) return NULL;
+    json_unescape(p + 1, out, len + 1);
+    return out;
 }

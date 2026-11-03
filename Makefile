@@ -221,6 +221,10 @@ test-threaded-news: test/test_threaded_news.o $(HOTLINE_C_OBJS) $(MOBIUS_OBJS)
 	./test_threaded_news
 
 # ChaCha20-Poly1305 AEAD tests
+test-json-readers: test/test_json_readers.o $(HOTLINE_C_OBJS) $(MOBIUS_OBJS)
+	$(CC) $(CFLAGS) -o test_json_readers $^ $(LDFLAGS) $(YAML_LDFLAGS)
+	./test_json_readers
+
 test-chacha20: test/test_chacha20poly1305.o src/hotline/chacha20poly1305.o
 	$(CC) $(CFLAGS) -o test_chacha20poly1305 $^
 	./test_chacha20poly1305
@@ -261,9 +265,9 @@ test-client: $(TEST_OBJC_OBJS) $(HOTLINE_OBJS)
 	$(CC) $(OBJCFLAGS) -o test_client $^ $(LDFLAGS)
 	./test_client
 
-test: test-wire test-mnemosyne test-chat-history test-access test-nick-color test-account-color test-client
+test: test-wire test-mnemosyne test-json-readers test-chat-history test-access test-nick-color test-account-color test-client
 else
-test: test-wire test-mnemosyne test-chat-history test-access test-nick-color test-account-color
+test: test-wire test-mnemosyne test-json-readers test-chat-history test-access test-nick-color test-account-color
 endif
 
 # --- Pattern rules ---
@@ -314,7 +318,7 @@ app: lemoniscate $(SERVER_COMPAT_BIN) gui
 clean:
 	rm -f $(HOTLINE_C_OBJS) $(HOTLINE_OBJC_OBJS) $(MOBIUS_OBJS) \
 	      $(TEST_C_OBJS) $(TEST_OBJC_OBJS) $(GUI_OBJC_OBJS) \
-	      libhotline.a lemoniscate $(SERVER_COMPAT_BIN) lemoniscate-gui test_runner test_mnemosyne test_mnemosyne_live test_client src/main.o test/test_mnemosyne.o test/test_mnemosyne_live.o
+	      libhotline.a lemoniscate $(SERVER_COMPAT_BIN) lemoniscate-gui test_runner test_mnemosyne test_mnemosyne_live test_json_readers test_client src/main.o test/test_mnemosyne.o test/test_mnemosyne_live.o
 	@find src test -name '*.d' -delete 2>/dev/null || true
 	rm -rf $(APP_BUNDLE)
 

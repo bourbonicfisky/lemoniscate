@@ -22,55 +22,27 @@
 
 static int json_get_int(const char *json, const char *key)
 {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return 0;
-    p += strlen(pattern);
-    while (*p == ' ') p++;
-    return atoi(p);
+    const char *p = json_find_value(json, key);
+    return p ? atoi(p) : 0;
 }
 
 static void json_get_string(const char *json, const char *key,
                             char *out, size_t out_size)
 {
-    out[0] = '\0';
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return;
-    p += strlen(pattern);
-
-    /* Read until unescaped quote */
-    size_t i = 0;
-    while (*p && i < out_size - 1) {
-        if (*p == '"') break;
-        if (*p == '\\' && *(p + 1)) {
-            switch (*(p + 1)) {
-            case '"': out[i++] = '"'; p += 2; break;
-            case '\\': out[i++] = '\\'; p += 2; break;
-            case 'n': out[i++] = '\n'; p += 2; break;
-            case 'r': out[i++] = '\r'; p += 2; break;
-            case 't': out[i++] = '\t'; p += 2; break;
-            default: out[i++] = *p; p++; break;
-            }
-        } else {
-            out[i++] = *p;
-            p++;
-        }
-    }
-    out[i] = '\0';
+    json_read_string(json, key, out, out_size);
 }
 
 static void json_get_guid(const char *json, uint8_t guid[16])
 {
-    memset(guid, 0, 16);
-    const char *p = strstr(json, "\"guid\":[");
-    if (!p) return;
-    p += 8;
+    const char *p;
     int i;
+
+    memset(guid, 0, 16);
+    p = json_find_value(json, "guid");
+    if (!p || *p != '[') return;
+    p++;
     for (i = 0; i < 16 && *p; i++) {
-        while (*p == ' ' || *p == '\n' || *p == '\r') p++;
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
         if (*p == ']') break;
         guid[i] = (uint8_t)atoi(p);
         p = strchr(p, ',');

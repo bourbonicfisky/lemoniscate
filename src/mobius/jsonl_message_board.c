@@ -17,80 +17,19 @@
 
 static int parse_jsonl_line(const char *line, mb_post_t *post)
 {
-    memset(post, 0, sizeof(*post));
-
-    /* Minimal JSON parser for known fields */
     const char *p;
 
-    /* id */
-    p = strstr(line, "\"id\":");
-    if (p) post->id = atoi(p + 5);
+    memset(post, 0, sizeof(*post));
 
-    /* nick */
-    p = strstr(line, "\"nick\":\"");
-    if (p) {
-        p += 8;
-        const char *end = strchr(p, '"');
-        if (end) {
-            size_t len = (size_t)(end - p);
-            if (len >= sizeof(post->nick)) len = sizeof(post->nick) - 1;
-            memcpy(post->nick, p, len);
-        }
-    }
+    /* Accepts both "key":"v" and the "key": "v" form our writer emits. */
+    p = json_find_value(line, "id");
+    if (p) post->id = atoi(p);
 
-    /* login */
-    p = strstr(line, "\"login\":\"");
-    if (p) {
-        p += 9;
-        const char *end = strchr(p, '"');
-        if (end) {
-            size_t len = (size_t)(end - p);
-            if (len >= sizeof(post->login)) len = sizeof(post->login) - 1;
-            memcpy(post->login, p, len);
-        }
-    }
+    json_read_string(line, "nick", post->nick, sizeof(post->nick));
+    json_read_string(line, "login", post->login, sizeof(post->login));
+    json_read_string(line, "ts", post->ts, sizeof(post->ts));
 
-    /* ts */
-    p = strstr(line, "\"ts\":\"");
-    if (p) {
-        p += 6;
-        const char *end = strchr(p, '"');
-        if (end) {
-            size_t len = (size_t)(end - p);
-            if (len >= sizeof(post->ts)) len = sizeof(post->ts) - 1;
-            memcpy(post->ts, p, len);
-        }
-    }
-
-    /* body — may contain escaped characters */
-    p = strstr(line, "\"body\":\"");
-    if (p) {
-        p += 8;
-        /* Find closing quote, handling escaped quotes */
-        json_buf_t buf;
-        json_buf_init(&buf);
-        while (*p && !(*p == '"' && *(p - 1) != '\\')) {
-            if (*p == '\\' && *(p + 1)) {
-                switch (*(p + 1)) {
-                case '"': json_buf_append(&buf, "\"", 1); p += 2; break;
-                case '\\': json_buf_append(&buf, "\\", 1); p += 2; break;
-                case 'n': json_buf_append(&buf, "\n", 1); p += 2; break;
-                case 'r': json_buf_append(&buf, "\r", 1); p += 2; break;
-                case 't': json_buf_append(&buf, "\t", 1); p += 2; break;
-                default: json_buf_append(&buf, p, 1); p++; break;
-                }
-            } else {
-                json_buf_append(&buf, p, 1);
-                p++;
-            }
-        }
-        if (buf.data) {
-            post->body = buf.data; /* transfer ownership */
-            buf.data = NULL;
-        }
-        json_buf_free(&buf);
-    }
-
+    post->body = json_read_string_alloc(line, "body");
     if (!post->body) {
         post->body = strdup("");
     }
@@ -114,13 +53,32 @@ static int load_posts(const char *path, mb_post_t **out, int *out_count,
     mb_post_t *posts = (mb_post_t *)calloc((size_t)cap, sizeof(mb_post_t));
     if (!posts) { fclose(f); return -1; }
 
-    char line[16384];
+    /* Lines can be arbitrarily long (large posts), so read each one into
+     * a growing buffer rather than a fixed array. (No getline on Tiger.) */
+    size_t line_cap = 4096;
+    char *line = (char *)malloc(line_cap);
+    if (!line) { free(posts); fclose(f); return -1; }
     int count = 0;
     int max_id = 0;
 
-    while (fgets(line, sizeof(line), f)) {
+    for (;;) {
+        size_t len = 0;
+        int got = 0;
+        while (fgets(line + len, (int)(line_cap - len), f)) {
+            got = 1;
+            len += strlen(line + len);
+            if (len > 0 && line[len - 1] == '\n') break;
+            if (len + 1 < line_cap) continue; /* EOF without newline */
+            {
+                char *bigger = (char *)realloc(line, line_cap * 2);
+                if (!bigger) break;
+                line = bigger;
+                line_cap *= 2;
+            }
+        }
+        if (!got) break;
+
         /* Strip newline */
-        size_t len = strlen(line);
         while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
             line[--len] = '\0';
         if (len == 0) continue;
@@ -135,8 +93,12 @@ static int load_posts(const char *path, mb_post_t **out, int *out_count,
         if (parse_jsonl_line(line, &posts[count]) == 0) {
             if (posts[count].id > max_id) max_id = posts[count].id;
             count++;
+        } else {
+            free(posts[count].body);
+            posts[count].body = NULL;
         }
     }
+    free(line);
     fclose(f);
 
     *out = posts;
@@ -498,7 +460,7 @@ int mobius_migrate_flat_to_jsonl(const char *txt_path, const char *jsonl_path)
 
             /* Escape body for JSON */
             json_buf_append_str(&buf, "\"body\": \"");
-            json_buf_append(&buf, body, body_len > 0 ? body_len : 0);
+            json_buf_append_escaped_n(&buf, body, body_len);
             json_buf_append_str(&buf, "\"");
 
             json_buf_append_str(&buf, ", ");
