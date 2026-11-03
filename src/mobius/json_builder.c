@@ -239,15 +239,21 @@ static size_t json_unescape(const char *p, char *out, size_t out_size)
             c = (char)json_hex4(p + 2);
             p += 6;
         } else if (*p == '\\' && p[1]) {
-            switch (p[1]) {
+            p += 2;
+            switch (p[-1]) {
             case 'n': c = '\n'; break;
             case 'r': c = '\r'; break;
             case 't': c = '\t'; break;
             case 'b': c = '\b'; break;
             case 'f': c = '\f'; break;
-            default:  c = p[1]; break; /* \" \\ \/ and anything else */
+            case '"': case '\\': case '/': c = p[-1]; break;
+            default:
+                /* Not a JSON escape (e.g. raw "\|" in ASCII art written by
+                 * older builds): keep the backslash literally. */
+                c = '\\';
+                p--;
+                break;
             }
-            p += 2;
         } else {
             c = *p++;
         }

@@ -87,6 +87,14 @@ static void test_read_string_escapes(void)
     assert(strcmp(out, "a\"b\\c\rd\ne\tf\001g") == 0);
 }
 
+static void test_read_string_keeps_unknown_escapes(void)
+{
+    /* Older builds wrote raw backslashes (ASCII art); keep them as-is. */
+    char out[64];
+    assert(json_read_string("{\"s\": \"|_| \\|/ _ \\_\\\\x\"}", "s", out, sizeof(out)) == 0);
+    assert(strcmp(out, "|_| \\|/ _ \\_\\x") == 0);
+}
+
 static void test_read_string_truncates_safely(void)
 {
     char out[4];
@@ -279,6 +287,7 @@ int main(void)
     TEST(test_find_value_compact_and_spaced);
     TEST(test_find_value_skips_key_text_inside_values);
     TEST(test_read_string_escapes);
+    TEST(test_read_string_keeps_unknown_escapes);
     TEST(test_read_string_truncates_safely);
     TEST(test_read_string_alloc_matches);
     TEST(test_board_survives_restart);
