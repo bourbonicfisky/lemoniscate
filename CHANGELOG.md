@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.8 — 2026-11-03
+
+### Added
+
+- **Colored nicknames**: Servers can deliver nickname colors to color-aware clients via the new `HL_FIELD_USER_COLOR` (0x0500) field on user-change broadcasts, and optionally honor colors clients set themselves (`TranSetClientUserInfo`, 304). New `ColoredNicknames:` block in `config.yaml` (and `ColoredNicknames*` plist keys): `Delivery` (off / auto / always), `HonorClientColors`, `DefaultAdminColor`, `DefaultGuestColor`. Per-account `Color` overrides the defaults. GUI: new Colored Nicknames settings section and a color row in the Account Editor.
+- **Auto-ban for repeat offenders**: An IP that trips the per-IP rate limiter 10 times within 5 minutes is added to the persistent banlist and dropped at accept, before any read or TLS handshake. Controlled by the new `AutoBanEnabled` setting (default on), with a matching GUI checkbox; the Bans tab gains a Refresh button to show bans written by the running server.
+- **Chat history settings in the GUI**: All nine `ChatHistory*` keys are now editable and round-trip through GUI saves (previously a GUI save silently dropped them), including a one-click *Generate Key…* for encryption at rest.
+
+### Fixed
+
+- **Message board and threaded news blank after a restart**: The board and news readers only matched `"key":"value"`, but the server writes `"key": "value"`, so after any restart every post and article loaded empty ("unknown (unknown date)", blank titles). The readers now accept either spacing, ignore key names that appear inside post text, decode `\u00XX` escapes, and preserve stray backslashes written by older builds. Existing data loads unchanged.
+- **Board migration produced broken records**: Migrating a classic `MessageBoard.txt` to `MessageBoard.jsonl` wrote post bodies unescaped, so quotes and line breaks corrupted posts. Bodies are now escaped.
+- **Long board posts truncated on load**: Posts longer than 16 KB were split by a fixed-size line buffer; lines of any length now load.
+- **Server freezes caused by silent connections**: Accepts, TLS handshakes (`SSL_accept`) and the Hotline handshake run on the main event-loop thread, and sockets had no timeout until after the TLS handshake. An internet scanner that opened a connection to the TLS port (5600/5601) or the file-transfer port and sent nothing froze the entire server — no logins, trackers, timers, or response to SIGTERM — for days, until it was force-killed. Every accepted socket now gets read/write timeouts immediately (10 s for the protocol ports, 30 s for file transfers).
+- **Silent start with default config**: When the directory given with `-c`/`--config` couldn't be read (for example, a network mount that wasn't up yet), the server started anyway with built-in defaults. It now exits with an error so the service manager retries. Running without `-c` still falls back to defaults.
+
+### Tests
+
+- New `make test-json-readers` suite (11 tests, part of `make test`): write-then-reload round trips for the board and news, migration escaping, long posts, and both JSON spacings.
+
 ## 0.1.7 — 2026-04-16
 
 ### Added
